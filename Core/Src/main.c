@@ -55,11 +55,11 @@ typedef enum Door {
 #define SOLENOID_ACTIVATE_PWM    255 // Full power
 #define SOLENOID_HOLD_MILLIS     550
 #define SOLENOID_HOLD_PWM        180 // From 0 to 255
-#define SOLENOID_RETURN_MILLIS   200
+#define SOLENOID_RETURN_MILLIS   5000
 
 // Stepper controller tuning
 #define USTEP_FRAC        8
-#define STEP_DELAY_MICROS 450
+#define STEP_DELAY_MICROS 1000
 
 // Stepper properties
 #define STEP_PER_REV  200
@@ -289,12 +289,17 @@ int main(void)
     MX_TIM2_Init();
     /* USER CODE BEGIN 2 */
     HAL_TIM_Base_Start(&htim1);
+    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
     /* USER CODE END 2 */
 
     /* Infinite loop */
     /* USER CODE BEGIN WHILE */
     while (1) {
-        check_zero();
+        //check_zero();
+    	motor_microstep(USTEP_PER_REV, 1);
+
     }
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
