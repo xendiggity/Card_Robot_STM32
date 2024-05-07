@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "usb_host.h"
+#include "stdlib.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -94,6 +95,8 @@ SPI_HandleTypeDef hspi1;
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 
+UART_HandleTypeDef huart3;
+
 /* USER CODE BEGIN PV */
 
 // The current micro-step within a full revolution (bounded by STEP_PER_REV * MICROSTEP_FRAC)
@@ -102,6 +105,12 @@ int16_t motor_abs_ustep = 0;
 uint8_t motor_last_dir = 1;
 // The IR value when check_zero() was last called.
 uint8_t ir_read_last = 0;
+// The Rx buffer of UART for getting wheel index, size of 2 bytes
+uint8_t Rx_buffer[2];
+// The Tx buffer of UART for sending done signals to Raspi, size of 1 byte
+uint8_t Tx_buffer[1];
+// The index received from Tx buffer
+unsigned short wheel_index;
 
 /* USER CODE END PV */
 
@@ -113,6 +122,7 @@ static void MX_I2S3_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_USART3_UART_Init(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
@@ -291,6 +301,7 @@ int main(void)
   MX_USB_HOST_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
+  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
     HAL_TIM_Base_Start(&htim1);
     HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
@@ -302,7 +313,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
     while (1) {
     	// ir demo
-      check_zero();
+      //check_zero();
         // motor demo
 //      motor_toslot(0, INPUT);
 //      HAL_Delay(500);
@@ -329,6 +340,18 @@ int main(void)
 //    	solenoid_open(OUTPUT_DOWN);
 //    	solenoid_open(OUTPUT_UP);
 
+    	// UART Test code with Raspberry Pi
+    	HAL_UART_Receive(&huart3, Rx_buffer, sizeof(Rx_buffer), 1000);
+    	wheel_index = atoi((uint8_t*)Rx_buffer);
+    	if (wheel_index == 41) {
+    		Tx_buffer[0] = 4;
+    		HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
+    		HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
+    	}
+    	else {
+    		HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
+    	}
+    	Tx_buffer[0] = 0;
     }
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
@@ -600,6 +623,39 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 2 */
   HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/**
+  * @brief USART3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART3_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART3_Init 0 */
+
+  /* USER CODE END USART3_Init 0 */
+
+  /* USER CODE BEGIN USART3_Init 1 */
+
+  /* USER CODE END USART3_Init 1 */
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 115200;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_1;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX_RX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART3_Init 2 */
+
+  /* USER CODE END USART3_Init 2 */
 
 }
 
