@@ -30,10 +30,10 @@
 /* USER CODE BEGIN PTD */
 
 typedef enum Door {
-    ZERO,
-    INPUT,
-    OUTPUT_DOWN,
-    OUTPUT_UP
+	ZERO,
+	INPUT,
+	OUTPUT_DOWN,
+	OUTPUT_UP
 } IndexerDoor;
 
 /* USER CODE END PTD */
@@ -106,7 +106,7 @@ uint8_t motor_last_dir = 1;
 // The IR value when check_zero() was last called.
 uint8_t ir_read_last = 0;
 // The Rx buffer of UART for getting wheel index, size of 2 bytes
-uint8_t Rx_buffer[2];
+uint8_t Rx_buffer[3];
 // The Tx buffer of UART for sending done signals to Raspi, size of 1 byte
 uint8_t Tx_buffer[1];
 // The index received from Tx buffer
@@ -142,126 +142,126 @@ void check_zero();
 
 // Wait for the specified number of microseconds.
 void microDelay(uint16_t delay) {
-    __HAL_TIM_SET_COUNTER(&htim1, 0);
-    while (__HAL_TIM_GET_COUNTER(&htim1) < delay);
+	__HAL_TIM_SET_COUNTER(&htim1, 0);
+	while (__HAL_TIM_GET_COUNTER(&htim1) < delay);
 }
 
 // Bounds the given micro-step within a full revolution.
 uint16_t bound_usteps(int16_t usteps) {
-    if (ABS(usteps) >= USTEP_PER_REV)
-        usteps %= USTEP_PER_REV;
-    return (uint16_t)(usteps < 0 ? usteps + USTEP_PER_REV : usteps);
+	if (ABS(usteps) >= USTEP_PER_REV)
+		usteps %= USTEP_PER_REV;
+	return (uint16_t)(usteps < 0 ? usteps + USTEP_PER_REV : usteps);
 }
 
 // Rotates the motor by a given number of micro-steps in one direction (CW or CCW).
 void motor_microstep(uint16_t usteps, uint8_t ccw) {
-    // Signal the motor controller to rotate the stepper
-    HAL_GPIO_WritePin(DIR_PORT, DIR_PIN, ccw == 0);
-    motor_last_dir = ccw;
-    int16_t step_dir = ccw ? 1 : -1;
-    for(uint16_t step = 0; step < usteps; ++step) {
-        motor_abs_ustep += step_dir;
-        HAL_GPIO_WritePin(STEP_PORT, STEP_PIN, GPIO_PIN_SET);
-        microDelay(STEP_DELAY_MICROS);
-        HAL_GPIO_WritePin(STEP_PORT, STEP_PIN, GPIO_PIN_RESET);
-        microDelay(STEP_DELAY_MICROS);
-    }
-    // Bound the absolute micro-step position
-    motor_abs_ustep = bound_usteps(motor_abs_ustep);
+	// Signal the motor controller to rotate the stepper
+	HAL_GPIO_WritePin(DIR_PORT, DIR_PIN, ccw == 0);
+	motor_last_dir = ccw;
+	int16_t step_dir = ccw ? 1 : -1;
+	for(uint16_t step = 0; step < usteps; ++step) {
+		motor_abs_ustep += step_dir;
+		HAL_GPIO_WritePin(STEP_PORT, STEP_PIN, GPIO_PIN_SET);
+		microDelay(STEP_DELAY_MICROS);
+		HAL_GPIO_WritePin(STEP_PORT, STEP_PIN, GPIO_PIN_RESET);
+		microDelay(STEP_DELAY_MICROS);
+	}
+	// Bound the absolute micro-step position
+	motor_abs_ustep = bound_usteps(motor_abs_ustep);
 }
 
 // Rotates the specified card slot to the specified position.
 // Each card index increases counter-clockwise (meaning a clockwise
 // rotation will increase the selected card index).
 void motor_toslot(uint16_t slot, IndexerDoor tgt) {
-    int16_t target_ustep_offset;
+	int16_t target_ustep_offset;
 
-    // Determine the target door's micro-step offset
-    switch (tgt) {
-    case ZERO:
-        target_ustep_offset = 0;
-        break;
-    case INPUT:
-        target_ustep_offset = USTEP_IN_OFFSET;
-        break;
-    case OUTPUT_DOWN:
-        target_ustep_offset = USTEP_OUTDOWN_OFFSET;
-        break;
-    case OUTPUT_UP:
-        target_ustep_offset = USTEP_OUTUP_OFFSET;
-        break;
-    default:
-        return;
-    }
+	// Determine the target door's micro-step offset
+	switch (tgt) {
+	case ZERO:
+		target_ustep_offset = 0;
+		break;
+	case INPUT:
+		target_ustep_offset = USTEP_IN_OFFSET;
+		break;
+	case OUTPUT_DOWN:
+		target_ustep_offset = USTEP_OUTDOWN_OFFSET;
+		break;
+	case OUTPUT_UP:
+		target_ustep_offset = USTEP_OUTUP_OFFSET;
+		break;
+	default:
+		return;
+	}
 
-    // Determine the current difference in position
-    int16_t motor_target_ustep = bound_usteps(slot * USTEP_PER_SLOT + target_ustep_offset);
-    int16_t ustep_diff = motor_target_ustep - motor_abs_ustep;
-    uint16_t ustep_num  = ABS(ustep_diff);
-    uint8_t  ustep_ccw  = ustep_diff >= 0;
-    // If the difference is over half a revolution, flip the direction
-    if (ustep_num > USTEP_PER_REV / 2) {
-        ustep_num = USTEP_PER_REV - ustep_num;
-        ustep_ccw = !ustep_ccw;
-    }
-    motor_microstep(ustep_num, ustep_ccw);
+	// Determine the current difference in position
+	int16_t motor_target_ustep = bound_usteps(slot * USTEP_PER_SLOT + target_ustep_offset);
+	int16_t ustep_diff = motor_target_ustep - motor_abs_ustep;
+	uint16_t ustep_num  = ABS(ustep_diff);
+	uint8_t  ustep_ccw  = ustep_diff >= 0;
+	// If the difference is over half a revolution, flip the direction
+	if (ustep_num > USTEP_PER_REV / 2) {
+		ustep_num = USTEP_PER_REV - ustep_num;
+		ustep_ccw = !ustep_ccw;
+	}
+	motor_microstep(ustep_num, ustep_ccw);
 }
 
 // Activates the given solenoid long enough to allow a card to pass in/out.
 void solenoid_open(IndexerDoor tgt) {
-    uint32_t tim_channel;
+	uint32_t tim_channel;
 
-    // Determine the solenoid's PWM channel
-    switch (tgt) {
-    case INPUT:
-        tim_channel = TIM_CHANNEL_2;
-        break;
-    case OUTPUT_DOWN:
-        tim_channel = TIM_CHANNEL_1;
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_7, GPIO_PIN_SET);
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_8, GPIO_PIN_RESET);
-        break;
-    case OUTPUT_UP:
-        tim_channel = TIM_CHANNEL_1;
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_7, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_8, GPIO_PIN_SET);
-        break;
-    default:
-        return;
+	// Determine the solenoid's PWM channel
+	switch (tgt) {
+	case INPUT:
+		tim_channel = TIM_CHANNEL_2;
+		break;
+	case OUTPUT_DOWN:
+		tim_channel = TIM_CHANNEL_1;
+		HAL_GPIO_WritePin(GPIOE, GPIO_PIN_7, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(GPIOE, GPIO_PIN_8, GPIO_PIN_RESET);
+		break;
+	case OUTPUT_UP:
+		tim_channel = TIM_CHANNEL_1;
+		HAL_GPIO_WritePin(GPIOE, GPIO_PIN_7, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(GPIOE, GPIO_PIN_8, GPIO_PIN_SET);
+		break;
+	default:
+		return;
 
 
-    }
+	}
 
-    // Activate, hold, and finally return the solenoid's piston
-    __HAL_TIM_SET_COMPARE(&htim2, tim_channel, SOLENOID_ACTIVATE_PWM);
-    HAL_Delay(SOLENOID_ACTIVATE_MILLIS);
-    __HAL_TIM_SET_COMPARE(&htim2, tim_channel, SOLENOID_HOLD_PWM);
-    HAL_Delay(SOLENOID_HOLD_MILLIS);
-    __HAL_TIM_SET_COMPARE(&htim2, tim_channel, 0);
-    HAL_Delay(SOLENOID_RETURN_MILLIS);
+	// Activate, hold, and finally return the solenoid's piston
+	__HAL_TIM_SET_COMPARE(&htim2, tim_channel, SOLENOID_ACTIVATE_PWM);
+	HAL_Delay(SOLENOID_ACTIVATE_MILLIS);
+	__HAL_TIM_SET_COMPARE(&htim2, tim_channel, SOLENOID_HOLD_PWM);
+	HAL_Delay(SOLENOID_HOLD_MILLIS);
+	__HAL_TIM_SET_COMPARE(&htim2, tim_channel, 0);
+	HAL_Delay(SOLENOID_RETURN_MILLIS);
 }
 
 // Checks if the IR sensor has been blocked.
 uint8_t ir_read() {
-    // Invert normally HIGH signal
-    return !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_8);
+	// Invert normally HIGH signal
+	return !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_8);
 }
 
 // Re-zeros the indexer if ir_read() changes to HIGH.
 // TODO: Call using an interrupt on the IR sensor.
 void check_zero() {
-    if (ir_read()) {
-        if (!ir_read_last) {
-            ir_read_last = 1;
-            if (motor_last_dir) {
-            	motor_abs_ustep = 0;
-            } else {
-            	motor_abs_ustep = USTEP_PER_SLOT;
-            }
-        }
-    } else {
-        ir_read_last = 0;
-    }
+	if (ir_read()) {
+		if (!ir_read_last) {
+			ir_read_last = 1;
+			if (motor_last_dir) {
+				motor_abs_ustep = 0;
+			} else {
+				motor_abs_ustep = USTEP_PER_SLOT;
+			}
+		}
+	} else {
+		ir_read_last = 0;
+	}
 }
 
 /* USER CODE END 0 */
@@ -303,56 +303,68 @@ int main(void)
   MX_TIM2_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-    HAL_TIM_Base_Start(&htim1);
-    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
-    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
+	HAL_TIM_Base_Start(&htim1);
+	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
+	HAL_UART_Receive_IT(&huart3, Rx_buffer, sizeof(Rx_buffer));
+
+	// Rotate wheel to begin at default position
+//	while (!ir_read()) {
+//		motor_microstep(1, 0);
+//	}
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-    while (1) {
-    	// ir demo
-      //check_zero();
-        // motor demo
-//      motor_toslot(0, INPUT);
-//      HAL_Delay(500);
-//
-//      motor_toslot(40, INPUT);
-//      HAL_Delay(500);
-//
-//      motor_toslot(20, INPUT);
-//      HAL_Delay(500);
-//
-//      motor_toslot(5, INPUT);
-//      HAL_Delay(500);
-//
-//      motor_toslot(10, INPUT);
-//      HAL_Delay(500);
-//
-//      motor_toslot(15, INPUT);
-//      HAL_Delay(500);
-//
-//      motor_toslot(20, INPUT);
-//      HAL_Delay(500);
-        // solenoid demo
-//    	solenoid_open(INPUT);
-//    	solenoid_open(OUTPUT_DOWN);
-//    	solenoid_open(OUTPUT_UP);
+	while (1) {
+		// ir demo
+		//check_zero();
+		// motor demo
+		//      motor_toslot(0, INPUT);
+		//      HAL_Delay(500);
+		//
+		//      motor_toslot(40, INPUT);
+		//      HAL_Delay(500);
+		//
+		//      motor_toslot(20, INPUT);
+		//      HAL_Delay(500);
+		//
+		//      motor_toslot(5, INPUT);
+		//      HAL_Delay(500);
+		//
+		//      motor_toslot(10, INPUT);
+		//      HAL_Delay(500);
+		//
+		//      motor_toslot(15, INPUT);
+		//      HAL_Delay(500);
+		//
+		//      motor_toslot(20, INPUT);
+		//      HAL_Delay(500);
+		// solenoid demo
+		//    	solenoid_open(INPUT);
+		//    	solenoid_open(OUTPUT_DOWN);
+		//    	solenoid_open(OUTPUT_UP);
 
-    	// UART Test code with Raspberry Pi
-    	HAL_UART_Receive(&huart3, Rx_buffer, sizeof(Rx_buffer), 1000);
-    	wheel_index = atoi((uint8_t*)Rx_buffer);
-    	if (wheel_index == 41) {
-    		Tx_buffer[0] = 4;
-    		HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
-    		HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
-    	}
-    	else {
-    		HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
-    	}
-    	Tx_buffer[0] = 0;
-    }
+//		// Test code for decomposing UART message
+//		//UART Test code with Raspberry Pi
+//		// Decomposing the received message
+//		HAL_UART_Receive(&huart3, Rx_buffer, sizeof(Rx_buffer), 1000);
+//		uint8_t action_byte = Rx_buffer[0];
+//		uint8_t index_byte_10s = Rx_buffer[1] - '0';
+//		uint8_t index_byte_1s = Rx_buffer[2] - '0';
+//		wheel_index = 10*index_byte_10s + index_byte_1s;
+//		if ((wheel_index == 16) && (action_byte == 0x61)){ // 0x61 is 'a'
+//			//	Tx_buffer[0] = 0;
+//			//	HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
+//				HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
+//		}
+//		else {
+//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
+//		}
+//		//Tx_buffer[0] = 0;
+//		//HAL_UART_Receive_IT(&huart3, Rx_buffer, sizeof(Rx_buffer));
+	}
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
@@ -759,7 +771,40 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	// Decomposing the received message
+	uint8_t action_byte = Rx_buffer[0];
+	uint8_t index_byte_10s = Rx_buffer[1] - '0';
+	uint8_t index_byte_1s = Rx_buffer[2] - '0';
+	wheel_index = 10*index_byte_10s + index_byte_1s;
 
+	// Perform actions based on what action byte was received
+	switch(action_byte) {
+		case 0x61: // a, input card
+			if (wheel_index == 16) {
+				HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
+			}
+			break;
+		case 0x62: // b, eject a card
+			break;
+		case 0x63: // c, hard reset, dump all cards
+			break;
+		default:   // honestly idk, send signal to tell pi to resend last message?
+			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
+			break;
+	}
+//	if ((wheel_index == 16) && (action_byte == 0x61)){ // 0x61 is 'a'
+//		//	Tx_buffer[0] = 0;
+//		//	HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
+//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
+//	}
+//	else {
+//		HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
+//	}
+//	//Tx_buffer[0] = 0;
+	HAL_UART_Receive_IT(&huart3, Rx_buffer, sizeof(Rx_buffer));
+}
 /* USER CODE END 4 */
 
 /**
@@ -769,10 +814,10 @@ static void MX_GPIO_Init(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-    /* User can add his own implementation to report the HAL error return state */
-    __disable_irq();
-    while (1) {
-    }
+	/* User can add his own implementation to report the HAL error return state */
+	__disable_irq();
+	while (1) {
+	}
   /* USER CODE END Error_Handler_Debug */
 }
 
@@ -787,7 +832,7 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-    /* User can add his own implementation to report the file name and line number,
+	/* User can add his own implementation to report the file name and line number,
      ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
