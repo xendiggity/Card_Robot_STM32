@@ -782,28 +782,40 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	// Perform actions based on what action byte was received
 	switch(action_byte) {
 		case 0x61: // a, input card
+			// TEST CODE
 			if (wheel_index == 16) {
 				HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
 			}
+
+			// ACTUAL CODE
+			//motor_toslot(wheel_index, INPUT);
+			//solenoid_open(INPUT);
+			// Tx_buffer[0] = 1; // signal done
+			//HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
 			break;
 		case 0x62: // b, eject a card
+			// ACTUAL CODE
+//			motor_toslot(wheel_index, OUTPUT_DOWN);
+//			solenoid_open(OUTPUT_DOWN);
+			// Tx_buffer[0] = 1; // signal done
+			//HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
 			break;
 		case 0x63: // c, hard reset, dump all cards
+			// EXPERIMENTAL CODE TO TEST
+			/*for(int i = 0; i < 54; i++) {
+				motor_toslot(i, OUTPUT_DOWN);
+				solenoid_open(OUTPUT_DOWN);
+			}*/
+			// Tx_buffer[0] = 1; // signal done
+			//HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
 			break;
 		default:   // honestly idk, send signal to tell pi to resend last message?
+			// TEST CODE
 			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
 			break;
 	}
-//	if ((wheel_index == 16) && (action_byte == 0x61)){ // 0x61 is 'a'
-//		//	Tx_buffer[0] = 0;
-//		//	HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
-//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
-//	}
-//	else {
-//		HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
-//	}
-//	//Tx_buffer[0] = 0;
-	HAL_UART_Receive_IT(&huart3, Rx_buffer, sizeof(Rx_buffer));
+	Tx_buffer[0] = 0; // Reset Tx buffer
+	HAL_UART_Receive_IT(&huart3, Rx_buffer, sizeof(Rx_buffer)); // Enable receive IT again
 }
 /* USER CODE END 4 */
 
