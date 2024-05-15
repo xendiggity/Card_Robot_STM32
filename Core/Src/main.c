@@ -318,6 +318,7 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	while (1) {
+		motor_microstep(USTEP_PER_REV, 1);
 		// ir demo
 		//check_zero();
 		// motor demo
@@ -781,37 +782,53 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 	// Perform actions based on what action byte was received
 	switch(action_byte) {
-		case 0x61: // a, input card
+		case 'i': // i for input
 			// TEST CODE
-			if (wheel_index == 16) {
+			if (wheel_index > 0 && wheel_index <= 14) {
 				HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
 			}
+			else if (wheel_index > 14 && wheel_index <= 28) {
+							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 1);
+						}
+			else if (wheel_index > 28 && wheel_index <= 42) {
+							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, 1);
+						}
+			else if (wheel_index > 42 && wheel_index <= 54) {
+							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, 1);
+						}
 
 			// ACTUAL CODE
-			//motor_toslot(wheel_index, INPUT);
-			//solenoid_open(INPUT);
-			// Tx_buffer[0] = 1; // signal done
-			//HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
+			motor_toslot(wheel_index, INPUT);
+			solenoid_open(INPUT);
+			 Tx_buffer[0] = 1; // signal done
+			HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
 			break;
-		case 0x62: // b, eject a card
+		case 'd': // d for dispense
+			// TEST CODE
+			if (wheel_index > 0 && wheel_index <= 14) {
+				HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
+			}
+			else if (wheel_index > 14 && wheel_index <= 28) {
+							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 1);
+						}
+			else if (wheel_index > 28 && wheel_index <= 42) {
+							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, 1);
+						}
+			else if (wheel_index > 42 && wheel_index <= 54) {
+							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, 1);
+						}
 			// ACTUAL CODE
-//			motor_toslot(wheel_index, OUTPUT_DOWN);
-//			solenoid_open(OUTPUT_DOWN);
-			// Tx_buffer[0] = 1; // signal done
-			//HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
-			break;
-		case 0x63: // c, hard reset, dump all cards
-			// EXPERIMENTAL CODE TO TEST
-			/*for(int i = 0; i < 54; i++) {
-				motor_toslot(i, OUTPUT_DOWN);
-				solenoid_open(OUTPUT_DOWN);
-			}*/
-			// Tx_buffer[0] = 1; // signal done
-			//HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
+			//motor_toslot(wheel_index, OUTPUT_DOWN);
+			//solenoid_open(OUTPUT_DOWN);
+//			 Tx_buffer[0] = 1; // signal done
+//			HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
 			break;
 		default:   // honestly idk, send signal to tell pi to resend last message?
 			// TEST CODE
-			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
+//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
+//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 0);
+//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, 0);
+//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, 0);
 			break;
 	}
 	Tx_buffer[0] = 0; // Reset Tx buffer
