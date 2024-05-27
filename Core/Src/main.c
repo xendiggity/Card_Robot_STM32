@@ -46,6 +46,11 @@ typedef enum Door {
 #define DIR_PORT  GPIOC
 #define STEP_PIN  GPIO_PIN_5
 #define STEP_PORT GPIOC
+#define IR_PIN GPIO_PIN_8
+#define IR_PORT GPIOC
+#define SOL_PIN_A GPIO_PIN_7
+#define SOL_PIN_B GPIO_PIN_8
+#define SOL_PORT GPIOE
 
 // Indexer configuration
 #define CARD_SLOTS 54
@@ -140,13 +145,23 @@ void check_zero();
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-// Wait for the specified number of microseconds.
+/**
+  * @brief Wait for the specified number of microseconds.
+  * @param uint16_t delay is an integer of the number of microseconds to wait
+  * @note
+  * @retval None
+  */
 void microDelay(uint16_t delay) {
 	__HAL_TIM_SET_COUNTER(&htim1, 0);
 	while (__HAL_TIM_GET_COUNTER(&htim1) < delay);
 }
 
-// Bounds the given micro-step within a full revolution.
+/**
+  * @brief Bounds the given micro-step within a full revolution.
+  * @param uint16_t usteps is an integer number current microsteps in the motor's rotation
+  * @note
+  * @retval Returns the bounded number of microsteps
+  */
 uint16_t bound_usteps(int16_t usteps) {
 	if (ABS(usteps) >= USTEP_PER_REV)
 		usteps %= USTEP_PER_REV;
@@ -154,6 +169,13 @@ uint16_t bound_usteps(int16_t usteps) {
 }
 
 // Rotates the motor by a given number of micro-steps in one direction (CW or CCW).
+/**
+  * @brief Rotates the motor by a given number of micro-steps in one direction (CW or CCW).
+  * @param uint16_t usteps is an integer number current microsteps in the motor's rotation and
+  * uint8_t ccw is an integer representing the direction of the wheel, (1 for CW, 0 for CCW)
+  * @note
+  * @retval None
+  */
 void motor_microstep(uint16_t usteps, uint8_t ccw) {
 	// Signal the motor controller to rotate the stepper
 	HAL_GPIO_WritePin(DIR_PORT, DIR_PIN, ccw == 0);
@@ -173,6 +195,15 @@ void motor_microstep(uint16_t usteps, uint8_t ccw) {
 // Rotates the specified card slot to the specified position.
 // Each card index increases counter-clockwise (meaning a clockwise
 // rotation will increase the selected card index).
+/**
+  * @brief Rotates the specified card slot to the specified position.
+  * Each card index increases counter-clockwise (meaning a clockwise
+  * rotation will increase the selected card index).
+  * @param slot is an integer containing the slot to move to, tgt toggles the case
+  * for each door to be used
+  * @note
+  * @retval None
+  */
 void motor_toslot(uint16_t slot, IndexerDoor tgt) {
 	int16_t target_ustep_offset;
 
@@ -207,7 +238,12 @@ void motor_toslot(uint16_t slot, IndexerDoor tgt) {
 	motor_microstep(ustep_num, ustep_ccw);
 }
 
-// Activates the given solenoid long enough to allow a card to pass in/out.
+/**
+  * @brief Activates the given solenoid long enough to allow a card to pass in/out.
+  * @param tgt is the value of which input/output door on the robot to use
+  * @note
+  * @retval None
+  */
 void solenoid_open(IndexerDoor tgt) {
 	uint32_t tim_channel;
 
@@ -218,13 +254,13 @@ void solenoid_open(IndexerDoor tgt) {
 		break;
 	case OUTPUT_DOWN:
 		tim_channel = TIM_CHANNEL_1;
-		HAL_GPIO_WritePin(GPIOE, GPIO_PIN_7, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(GPIOE, GPIO_PIN_8, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(SOL_PORT, SOL_PIN_A, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(SOL_PORT, SOL_PIN_B, GPIO_PIN_RESET);
 		break;
 	case OUTPUT_UP:
 		tim_channel = TIM_CHANNEL_1;
-		HAL_GPIO_WritePin(GPIOE, GPIO_PIN_7, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(GPIOE, GPIO_PIN_8, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(SOL_PORT, SOL_PIN_A, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(SOL_PORT, SOL_PIN_B, GPIO_PIN_SET);
 		break;
 	default:
 		return;
@@ -241,14 +277,25 @@ void solenoid_open(IndexerDoor tgt) {
 	HAL_Delay(SOLENOID_RETURN_MILLIS);
 }
 
-// Checks if the IR sensor has been blocked.
+/**
+  * @brief Checks if the IR sensor has been blocked.
+  * @param
+  * @note
+  * @retval Return an inverted signal received from the IR sensor
+  */
 uint8_t ir_read() {
 	// Invert normally HIGH signal
-	return !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_8);
+	return !HAL_GPIO_ReadPin(IR_PORT, IR_PIN);
 }
 
 // Re-zeros the indexer if ir_read() changes to HIGH.
 // TODO: Call using an interrupt on the IR sensor.
+/**
+  * @brief Re-zeros the indexer if ir_read() changes to HIGH.
+  * @param
+  * @note
+  * @retval None
+  */
 void check_zero() {
 	if (ir_read()) {
 		if (!ir_read_last) {
@@ -318,7 +365,7 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	while (1) {
-		motor_microstep(USTEP_PER_REV, 1);
+		// motor_microstep(USTEP_PER_REV, 1);
 		// ir demo
 		//check_zero();
 		// motor demo
@@ -772,6 +819,16 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+  * @brief Logic for what the robot will do next based on the serial data received
+  * from the Raspbeery Pi. This includes indexing the wheel to the right slot, opening
+  * the correct solenoid, and transmitting an action completion signal
+  * @param UART_HandleTypeDef structure which holds the configuration settings and UART
+  * state information for UART communication
+  * @note
+  * @retval None, but calls ReceiveIT function again to enable interrupts again
+  */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	// Decomposing the received message
@@ -799,9 +856,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 			// ACTUAL CODE
 			motor_toslot(wheel_index, INPUT);
-			solenoid_open(INPUT);
-			 Tx_buffer[0] = 1; // signal done
-			HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
+			//solenoid_open(INPUT);
+			//Tx_buffer[0] = 1; // signal done
+			//HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
 			break;
 		case 'd': // d for dispense
 			// TEST CODE
@@ -818,7 +875,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, 1);
 						}
 			// ACTUAL CODE
-			//motor_toslot(wheel_index, OUTPUT_DOWN);
+			motor_toslot(wheel_index, OUTPUT_DOWN);
 			//solenoid_open(OUTPUT_DOWN);
 //			 Tx_buffer[0] = 1; // signal done
 //			HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
