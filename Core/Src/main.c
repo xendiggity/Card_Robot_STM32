@@ -62,23 +62,23 @@ typedef enum Door {
 #define SOLENOID_RETURN_MILLIS   1000
 
 // Stepper controller tuning
-#define USTEP_FRAC        8
-#define STEP_DELAY_MICROS 450
+#define USTEP_FRAC        16
+#define STEP_DELAY_MICROS 1000
+
+// Stepper revolutions per indexer revolutions (based on pulley teeth)
+#define STEPPER_OUT_RATIO (54.0 / 40.0)
 
 // Stepper properties
 #define STEP_PER_REV  200
 #define USTEP_PER_REV (STEP_PER_REV * USTEP_FRAC)
 
-// Stepper revolutions per indexer revolutions (based on pulley teeth)
-#define STEPPER_OUT_RATIO (54 / 40)
-
 // Number of micro-steps per card slot
-#define USTEP_PER_SLOT (STEP_PER_REV * USTEP_FRAC * STEPPER_OUT_RATIO / CARD_SLOTS)
+#define USTEP_PER_SLOT (USTEP_PER_REV / CARD_SLOTS)
 
 // Offsets for each card door
-#define USTEP_IN_OFFSET        7 * USTEP_PER_SLOT
-#define USTEP_OUTDOWN_OFFSET  19 * USTEP_PER_SLOT
-#define USTEP_OUTUP_OFFSET   -19 * USTEP_PER_SLOT
+#define USTEP_IN_OFFSET        (7.25 * USTEP_PER_SLOT)
+#define USTEP_OUTDOWN_OFFSET  (18.75 * USTEP_PER_SLOT)
+#define USTEP_OUTUP_OFFSET   (-19.5 * USTEP_PER_SLOT)
 
 /* USER CODE END PD */
 
@@ -90,11 +90,7 @@ typedef enum Door {
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-I2C_HandleTypeDef hi2c1;
-
 I2S_HandleTypeDef hi2s3;
-
-SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
@@ -115,15 +111,15 @@ uint8_t Rx_buffer[3];
 uint8_t Tx_buffer[1];
 // The index received from Tx buffer
 unsigned short wheel_index;
+// The current door to open
+IndexerDoor current_door;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_I2C1_Init(void);
 static void MX_I2S3_Init(void);
-static void MX_SPI1_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_USART3_UART_Init(void);
@@ -176,19 +172,19 @@ uint16_t bound_usteps(int16_t usteps) {
   * @retval None
   */
 void motor_microstep(uint16_t usteps, uint8_t ccw) {
+	int16_t usteps_geared = usteps * STEPPER_OUT_RATIO;
 	// Signal the motor controller to rotate the stepper
-	HAL_GPIO_WritePin(DIR_PORT, DIR_PIN, ccw == 0);
+	HAL_GPIO_WritePin(DIR_PORT, DIR_PIN, ccw != 0);
 	motor_last_dir = ccw;
-	int16_t step_dir = ccw ? 1 : -1;
-	for(uint16_t step = 0; step < usteps; ++step) {
-		motor_abs_ustep += step_dir;
+	for(uint16_t step = 0; step < usteps_geared; ++step) {
 		HAL_GPIO_WritePin(STEP_PORT, STEP_PIN, GPIO_PIN_SET);
 		microDelay(STEP_DELAY_MICROS);
 		HAL_GPIO_WritePin(STEP_PORT, STEP_PIN, GPIO_PIN_RESET);
 		microDelay(STEP_DELAY_MICROS);
 	}
 	// Bound the absolute micro-step position
-	motor_abs_ustep = bound_usteps(motor_abs_ustep);
+	int16_t step_dir = ccw ? 1 : -1;
+	motor_abs_ustep = bound_usteps(motor_abs_ustep + usteps * step_dir);
 }
 
 /**
@@ -338,9 +334,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_I2C1_Init();
   MX_I2S3_Init();
-  MX_SPI1_Init();
   MX_USB_HOST_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
@@ -352,43 +346,51 @@ int main(void)
 	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
 	HAL_UART_Receive_IT(&huart3, Rx_buffer, sizeof(Rx_buffer));
 
-	// Rotate wheel to begin at default position
-//	while (!ir_read()) {
-//		motor_microstep(1, 0);
-//	}
+	current_door = ZERO;
+
+//	 Rotate wheel to begin at default position
+	while (!ir_read()) {
+		motor_microstep(1, 0);
+	}
+	motor_abs_ustep = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	while (1) {
-		// motor_microstep(USTEP_PER_REV, 1);
+		if (current_door != ZERO) {
+			solenoid_open(current_door);
+			current_door = ZERO;
+		}
+//		 motor_microstep(USTEP_PER_REV, 1);
 		// ir demo
 		//check_zero();
 		// motor demo
-		//      motor_toslot(0, INPUT);
-		//      HAL_Delay(500);
-		//
-		//      motor_toslot(40, INPUT);
-		//      HAL_Delay(500);
-		//
-		//      motor_toslot(20, INPUT);
-		//      HAL_Delay(500);
-		//
-		//      motor_toslot(5, INPUT);
-		//      HAL_Delay(500);
-		//
-		//      motor_toslot(10, INPUT);
-		//      HAL_Delay(500);
-		//
-		//      motor_toslot(15, INPUT);
-		//      HAL_Delay(500);
-		//
-		//      motor_toslot(20, INPUT);
-		//      HAL_Delay(500);
-		// solenoid demo
-		//    	solenoid_open(INPUT);
-		//    	solenoid_open(OUTPUT_DOWN);
-		//    	solenoid_open(OUTPUT_UP);
+		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
+		      motor_toslot(0, INPUT);
+		      HAL_Delay(3000);
+
+		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 1);
+		      motor_toslot(0, OUTPUT_DOWN);
+		      HAL_Delay(3000);
+
+		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, 1);
+		      motor_toslot(0, OUTPUT_UP);
+		      HAL_Delay(3000);
+
+		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
+		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 0);
+		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, 0);
+//
+//		      motor_toslot(15, INPUT);
+//		      HAL_Delay(500);
+//
+//		      motor_toslot(20, INPUT);
+//		      HAL_Delay(500);
+//		 solenoid demo
+//		    	solenoid_open(INPUT);
+//		    	solenoid_open(OUTPUT_DOWN);
+//		    	solenoid_open(OUTPUT_UP);
 
 //		// Test code for decomposing UART message
 //		//UART Test code with Raspberry Pi
@@ -464,40 +466,6 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief I2C1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2C1_Init(void)
-{
-
-  /* USER CODE BEGIN I2C1_Init 0 */
-
-  /* USER CODE END I2C1_Init 0 */
-
-  /* USER CODE BEGIN I2C1_Init 1 */
-
-  /* USER CODE END I2C1_Init 1 */
-  hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 100000;
-  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
-  hi2c1.Init.OwnAddress1 = 0;
-  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2C1_Init 2 */
-
-  /* USER CODE END I2C1_Init 2 */
-
-}
-
-/**
   * @brief I2S3 Initialization Function
   * @param None
   * @retval None
@@ -528,44 +496,6 @@ static void MX_I2S3_Init(void)
   /* USER CODE BEGIN I2S3_Init 2 */
 
   /* USER CODE END I2S3_Init 2 */
-
-}
-
-/**
-  * @brief SPI1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SPI1_Init(void)
-{
-
-  /* USER CODE BEGIN SPI1_Init 0 */
-
-  /* USER CODE END SPI1_Init 0 */
-
-  /* USER CODE BEGIN SPI1_Init 1 */
-
-  /* USER CODE END SPI1_Init 1 */
-  /* SPI1 parameter configuration*/
-  hspi1.Instance = SPI1;
-  hspi1.Init.Mode = SPI_MODE_MASTER;
-  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
-  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi1.Init.CRCPolynomial = 10;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SPI1_Init 2 */
-
-  /* USER CODE END SPI1_Init 2 */
 
 }
 
@@ -744,8 +674,8 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_7|GPIO_PIN_8, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin
-                          |Audio_RST_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_10|LD4_Pin|LD3_Pin|LD5_Pin
+                          |LD6_Pin|Audio_RST_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : CS_I2C_SPI_Pin PE7 PE8 */
   GPIO_InitStruct.Pin = CS_I2C_SPI_Pin|GPIO_PIN_7|GPIO_PIN_8;
@@ -771,6 +701,14 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
   HAL_GPIO_Init(PDM_OUT_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pins : SPI1_SCK_Pin SPI1_MISO_Pin SPI1_MOSI_Pin */
+  GPIO_InitStruct.Pin = SPI1_SCK_Pin|SPI1_MISO_Pin|SPI1_MOSI_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
   /*Configure GPIO pin : BOOT1_Pin */
   GPIO_InitStruct.Pin = BOOT1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -785,10 +723,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
   HAL_GPIO_Init(CLK_IN_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LD4_Pin LD3_Pin LD5_Pin LD6_Pin
-                           Audio_RST_Pin */
-  GPIO_InitStruct.Pin = LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin
-                          |Audio_RST_Pin;
+  /*Configure GPIO pins : PD10 LD4_Pin LD3_Pin LD5_Pin
+                           LD6_Pin Audio_RST_Pin */
+  GPIO_InitStruct.Pin = GPIO_PIN_10|LD4_Pin|LD3_Pin|LD5_Pin
+                          |LD6_Pin|Audio_RST_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -799,6 +737,14 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(OTG_FS_OverCurrent_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : Audio_SCL_Pin Audio_SDA_Pin */
+  GPIO_InitStruct.Pin = Audio_SCL_Pin|Audio_SDA_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : MEMS_INT2_Pin */
   GPIO_InitStruct.Pin = MEMS_INT2_Pin;
@@ -848,7 +794,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 			// ACTUAL CODE
 			//motor_toslot(wheel_index, INPUT);
+			//
 			//solenoid_open(INPUT);
+			current_door = INPUT;
 			//Tx_buffer[0] = 1; // signal done
 			//HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
 			break;
@@ -867,12 +815,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, 1);
 						}
 			// ACTUAL CODE
-			//motor_toslot(wheel_index, OUTPUT_DOWN);
-			//solenoid_open(OUTPUT_DOWN);
-//			Tx_buffer[0] = 1; // signal done
-//			HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
-			break;
-		default:   // honestly idk, send signal to tell pi to resend last message?
+			//motor_toslot(wheel_index, OUTPUT_UP);
+			//solenoid_open(OUTPUT_UP);
+			current_door = OUTPUT_UP;
+		default:
 			// TEST CODE
 //			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
 //			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 0);
