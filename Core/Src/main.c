@@ -35,6 +35,14 @@ typedef enum Door {
 	OUTPUT_UP
 } IndexerDoor;
 
+typedef enum MS_Mode {
+	FULL_STEP,
+	HALF_STEP,
+	QUARTER_STEP,
+	EIGHTH_STEP,
+	SIXTEENTH_STEP
+} Microstep_Mode;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -50,6 +58,10 @@ typedef enum Door {
 #define SOL_PIN_A GPIO_PIN_7
 #define SOL_PIN_B GPIO_PIN_8
 #define SOL_PORT GPIOE
+#define MICROSTEP_PORT GPIOD
+#define MS1_PIN GPIO_PIN_0
+#define MS2_PIN GPIO_PIN_1
+#define MS3_PIN GPIO_PIN_2
 
 // Indexer configuration
 #define CARD_SLOTS 54
@@ -57,28 +69,25 @@ typedef enum Door {
 // Solenoid controller tuning
 #define SOLENOID_ACTIVATE_MILLIS 200
 #define SOLENOID_ACTIVATE_PWM    255 // Full power
-#define SOLENOID_HOLD_MILLIS     550
+#define SOLENOID_HOLD_MILLIS     600
 #define SOLENOID_HOLD_PWM        180 // From 0 to 255
-#define SOLENOID_RETURN_MILLIS   1000
+#define SOLENOID_RETURN_MILLIS   100
 
 // Stepper controller tuning
-#define USTEP_FRAC        16
-#define STEP_DELAY_MICROS 1000
+#define STEP_DELAY_MICROS 850
 
-// Stepper revolutions per indexer revolutions (based on pulley teeth)
-#define STEPPER_OUT_RATIO (54.0 / 40.0)
+// Number of micro-steps per card slot
+//#define USTEP_PER_SLOT (USTEP_PER_REV / CARD_SLOTS)
+#define USTEP_PER_SLOT (5 * ustep_frac)
 
 // Stepper properties
 #define STEP_PER_REV  200
-#define USTEP_PER_REV (STEP_PER_REV * USTEP_FRAC)
-
-// Number of micro-steps per card slot
-#define USTEP_PER_SLOT (USTEP_PER_REV / CARD_SLOTS)
+#define USTEP_PER_REV (USTEP_PER_SLOT * CARD_SLOTS)
 
 // Offsets for each card door
-#define USTEP_IN_OFFSET        (7.25 * USTEP_PER_SLOT)
+#define USTEP_IN_OFFSET        (7.5 * USTEP_PER_SLOT)
 #define USTEP_OUTDOWN_OFFSET  (18.75 * USTEP_PER_SLOT)
-#define USTEP_OUTUP_OFFSET   (-19.5 * USTEP_PER_SLOT)
+#define USTEP_OUTUP_OFFSET   (-19.25 * USTEP_PER_SLOT)
 
 /* USER CODE END PD */
 
@@ -105,14 +114,19 @@ int16_t motor_abs_ustep = 0;
 uint8_t motor_last_dir = 1;
 // The IR value when check_zero() was last called.
 uint8_t ir_read_last = 0;
-// The Rx buffer of UART for getting wheel index, size of 2 bytes
+// The Rx buffer of UART for getting wheel index, size of 3 bytes
 uint8_t Rx_buffer[3];
-// The Tx buffer of UART for sending done signals to Raspi, size of 1 byte
-uint8_t Tx_buffer[1];
-// The index received from Tx buffer
+// The index received from Rx buffer
 unsigned short wheel_index;
+
+// The current microstepping fraction
+uint16_t ustep_frac;
+
+
 // The current door to open
 IndexerDoor current_door;
+// The current card slot to rotate
+uint16_t current_slot;
 
 /* USER CODE END PV */
 
@@ -129,7 +143,9 @@ void MX_USB_HOST_Process(void);
 
 void microDelay(uint16_t delay);
 uint16_t bound_usteps(int16_t usteps);
+void motor_set_microsteps(Microstep_Mode ms_mode);
 void motor_microstep(uint16_t usteps, uint8_t ccw);
+void motor_vibrate(uint16_t usteps, uint32_t millis);
 void motor_toslot(uint16_t slot, IndexerDoor tgt);
 void solenoid_open(IndexerDoor tgt);
 uint8_t ir_read();
@@ -163,6 +179,48 @@ uint16_t bound_usteps(int16_t usteps) {
 	return (uint16_t)(usteps < 0 ? usteps + USTEP_PER_REV : usteps);
 }
 
+// Sets the micro-stepping size for motor rotation.
+/**
+  * @brief Sets the micro-stepping size for motor rotation.
+  * @param Microstep_Mode ms_mode is the micro-stepping size to use.
+  * @note
+  * @retval None
+  */
+void motor_set_microsteps(Microstep_Mode ms_mode) {
+	switch (ms_mode) {
+	case FULL_STEP:
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS1_PIN, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS2_PIN, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS3_PIN, GPIO_PIN_RESET);
+		ustep_frac = 1;
+		break;
+	case HALF_STEP:
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS1_PIN, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS2_PIN, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS3_PIN, GPIO_PIN_RESET);
+		ustep_frac = 2;
+		break;
+	case QUARTER_STEP:
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS1_PIN, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS2_PIN, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS3_PIN, GPIO_PIN_RESET);
+		ustep_frac = 4;
+		break;
+	case EIGHTH_STEP:
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS1_PIN, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS2_PIN, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS3_PIN, GPIO_PIN_RESET);
+		ustep_frac = 8;
+		break;
+	case SIXTEENTH_STEP:
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS1_PIN, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS2_PIN, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(MICROSTEP_PORT, MS3_PIN, GPIO_PIN_SET);
+		ustep_frac = 16;
+		break;
+	}
+}
+
 // Rotates the motor by a given number of micro-steps in one direction (CW or CCW).
 /**
   * @brief Rotates the motor by a given number of micro-steps in one direction (CW or CCW).
@@ -172,11 +230,10 @@ uint16_t bound_usteps(int16_t usteps) {
   * @retval None
   */
 void motor_microstep(uint16_t usteps, uint8_t ccw) {
-	int16_t usteps_geared = usteps * STEPPER_OUT_RATIO;
 	// Signal the motor controller to rotate the stepper
 	HAL_GPIO_WritePin(DIR_PORT, DIR_PIN, ccw != 0);
 	motor_last_dir = ccw;
-	for(uint16_t step = 0; step < usteps_geared; ++step) {
+	for(uint16_t step = 0; step < usteps; ++step) {
 		HAL_GPIO_WritePin(STEP_PORT, STEP_PIN, GPIO_PIN_SET);
 		microDelay(STEP_DELAY_MICROS);
 		HAL_GPIO_WritePin(STEP_PORT, STEP_PIN, GPIO_PIN_RESET);
@@ -185,6 +242,32 @@ void motor_microstep(uint16_t usteps, uint8_t ccw) {
 	// Bound the absolute micro-step position
 	int16_t step_dir = ccw ? 1 : -1;
 	motor_abs_ustep = bound_usteps(motor_abs_ustep + usteps * step_dir);
+}
+
+// Vibrates the motor by a given number of micro-steps for the specified duration.
+/**
+  * @brief Vibrates the motor by a given number of micro-steps for the specified duration.
+  * @param uint16_t usteps is the number of microsteps to travel for each vibration direction.
+  * uint32_t millis is the number of milliseconds to perform the vibration.
+  * @note
+  * @retval None
+  */
+void motor_vibrate(uint16_t usteps, uint32_t millis) {
+	uint32_t end_time = HAL_GetTick() + millis;
+	motor_set_microsteps(FULL_STEP);
+	while(HAL_GetTick() < end_time) {
+		for(uint16_t dir = 0; dir <= 1; ++dir) {
+			motor_last_dir = dir;
+			HAL_GPIO_WritePin(DIR_PORT, DIR_PIN, dir != 0);
+			for(uint16_t step = 0; step < usteps; ++step) {
+				HAL_GPIO_WritePin(STEP_PORT, STEP_PIN, GPIO_PIN_SET);
+				microDelay(STEP_DELAY_MICROS * 16);
+				HAL_GPIO_WritePin(STEP_PORT, STEP_PIN, GPIO_PIN_RESET);
+				microDelay(STEP_DELAY_MICROS * 16);
+			}
+		}
+	}
+	motor_set_microsteps(EIGHTH_STEP);
 }
 
 /**
@@ -263,8 +346,10 @@ void solenoid_open(IndexerDoor tgt) {
 	// Activate, hold, and finally return the solenoid's piston
 	__HAL_TIM_SET_COMPARE(&htim2, tim_channel, SOLENOID_ACTIVATE_PWM);
 	HAL_Delay(SOLENOID_ACTIVATE_MILLIS);
+	//motor_vibrate(1, SOLENOID_ACTIVATE_MILLIS);
 	__HAL_TIM_SET_COMPARE(&htim2, tim_channel, SOLENOID_HOLD_PWM);
 	HAL_Delay(SOLENOID_HOLD_MILLIS);
+	//motor_vibrate(1, SOLENOID_HOLD_MILLIS);
 	__HAL_TIM_SET_COMPARE(&htim2, tim_channel, 0);
 	HAL_Delay(SOLENOID_RETURN_MILLIS);
 }
@@ -280,8 +365,6 @@ uint8_t ir_read() {
 	return !HAL_GPIO_ReadPin(IR_PORT, IR_PIN);
 }
 
-// Re-zeros the indexer if ir_read() changes to HIGH.
-// TODO: Call using an interrupt on the IR sensor.
 /**
   * @brief Re-zeros the indexer if ir_read() changes to HIGH.
   * @param
@@ -347,6 +430,8 @@ int main(void)
 	HAL_UART_Receive_IT(&huart3, Rx_buffer, sizeof(Rx_buffer));
 
 	current_door = ZERO;
+	current_slot = CARD_SLOTS;
+	motor_set_microsteps(EIGHTH_STEP);
 
 //	 Rotate wheel to begin at default position
 	while (!ir_read()) {
@@ -359,57 +444,13 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 	while (1) {
 		if (current_door != ZERO) {
+			if (current_slot >= 0 && current_slot < CARD_SLOTS) {
+				motor_toslot(current_slot, current_door);
+				current_slot = CARD_SLOTS;
+			}
 			solenoid_open(current_door);
 			current_door = ZERO;
 		}
-//		 motor_microstep(USTEP_PER_REV, 1);
-		// ir demo
-		//check_zero();
-		// motor demo
-		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
-		      motor_toslot(0, INPUT);
-		      HAL_Delay(3000);
-
-		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 1);
-		      motor_toslot(0, OUTPUT_DOWN);
-		      HAL_Delay(3000);
-
-		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, 1);
-		      motor_toslot(0, OUTPUT_UP);
-		      HAL_Delay(3000);
-
-		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
-		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 0);
-		      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, 0);
-//
-//		      motor_toslot(15, INPUT);
-//		      HAL_Delay(500);
-//
-//		      motor_toslot(20, INPUT);
-//		      HAL_Delay(500);
-//		 solenoid demo
-//		    	solenoid_open(INPUT);
-//		    	solenoid_open(OUTPUT_DOWN);
-//		    	solenoid_open(OUTPUT_UP);
-
-//		// Test code for decomposing UART message
-//		//UART Test code with Raspberry Pi
-//		// Decomposing the received message
-//		HAL_UART_Receive(&huart3, Rx_buffer, sizeof(Rx_buffer), 1000);
-//		uint8_t action_byte = Rx_buffer[0];
-//		uint8_t index_byte_10s = Rx_buffer[1] - '0';
-//		uint8_t index_byte_1s = Rx_buffer[2] - '0';
-//		wheel_index = 10*index_byte_10s + index_byte_1s;
-//		if ((wheel_index == 16) && (action_byte == 0x61)){ // 0x61 is 'a'
-//			//	Tx_buffer[0] = 0;
-//			//	HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
-//				HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
-//		}
-//		else {
-//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
-//		}
-//		//Tx_buffer[0] = 0;
-//		//HAL_UART_Receive_IT(&huart3, Rx_buffer, sizeof(Rx_buffer));
 	}
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
@@ -675,7 +716,8 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, GPIO_PIN_10|LD4_Pin|LD3_Pin|LD5_Pin
-                          |LD6_Pin|Audio_RST_Pin, GPIO_PIN_RESET);
+                          |LD6_Pin|GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2
+                          |Audio_RST_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : CS_I2C_SPI_Pin PE7 PE8 */
   GPIO_InitStruct.Pin = CS_I2C_SPI_Pin|GPIO_PIN_7|GPIO_PIN_8;
@@ -724,9 +766,11 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(CLK_IN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PD10 LD4_Pin LD3_Pin LD5_Pin
-                           LD6_Pin Audio_RST_Pin */
+                           LD6_Pin PD0 PD1 PD2
+                           Audio_RST_Pin */
   GPIO_InitStruct.Pin = GPIO_PIN_10|LD4_Pin|LD3_Pin|LD5_Pin
-                          |LD6_Pin|Audio_RST_Pin;
+                          |LD6_Pin|GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2
+                          |Audio_RST_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -778,55 +822,15 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	// Perform actions based on what action byte was received
 	switch(action_byte) {
 		case 'i': // i for input
-			// TEST CODE
-			if (wheel_index > 0 && wheel_index <= 14) {
-				HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
-			}
-			else if (wheel_index > 14 && wheel_index <= 28) {
-							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 1);
-						}
-			else if (wheel_index > 28 && wheel_index <= 42) {
-							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, 1);
-						}
-			else if (wheel_index > 42 && wheel_index <= 54) {
-							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, 1);
-						}
-
-			// ACTUAL CODE
-			//motor_toslot(wheel_index, INPUT);
-			//
-			//solenoid_open(INPUT);
+			current_slot = wheel_index;
 			current_door = INPUT;
-			//Tx_buffer[0] = 1; // signal done
-			//HAL_UART_Transmit(&huart3, Tx_buffer, sizeof(Tx_buffer), 1000);
 			break;
 		case 'd': // d for dispense
-			// TEST CODE
-			if (wheel_index > 0 && wheel_index <= 14) {
-				HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
-			}
-			else if (wheel_index > 14 && wheel_index <= 28) {
-							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 1);
-						}
-			else if (wheel_index > 28 && wheel_index <= 42) {
-							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, 1);
-						}
-			else if (wheel_index > 42 && wheel_index <= 54) {
-							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, 1);
-						}
-			// ACTUAL CODE
-			//motor_toslot(wheel_index, OUTPUT_UP);
-			//solenoid_open(OUTPUT_UP);
+			current_slot = wheel_index;
 			current_door = OUTPUT_UP;
 		default:
-			// TEST CODE
-//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
-//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 0);
-//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, 0);
-//			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, 0);
 			break;
 	}
-	Tx_buffer[0] = 0; // Reset Tx buffer
 	HAL_UART_Receive_IT(&huart3, Rx_buffer, sizeof(Rx_buffer)); // Enable receive IT again
 }
 /* USER CODE END 4 */
